@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>SG HDB Carpark Availability</title>
+  <style>
+    :root {
+      --bg-color: #f4f6f8;
+      --card-bg: #ffffff;
+      --text-color: #1a1d20;
+      --border-color: #e2e8f0;
+      --green-bg: #d1fae5;
+      --green-text: #065f46;
+      --amber-bg: #fef3c7;
+      --amber-text: #92400e;
+      --red-bg: #fee2e2;
+      --red-text: #991b1b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      padding: 16px;
+      display: flex;
+      justify-content: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 480px;
+    }
+
+    header {
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    p.subtitle {
+      font-size: 0.85rem;
+      color: #64748b;
+      margin-top: 4px;
+    }
+
+    .search-container {
+      position: relative;
+      margin-bottom: 16px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 14px 16px;
+      font-size: 1rem;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      outline: none;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input[type="text"]:focus {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    }
+
+    .autocomplete-list {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      margin-top: 6px;
+      max-height: 240px;
+      overflow-y: auto;
+      z-index: 100;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+
+    .autocomplete-item {
+      padding: 12px 16px;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    .autocomplete-item:last-child {
+      border-bottom: none;
+    }
+
+    .autocomplete-item:hover, .autocomplete-item.active {
+      background-color: #f8fafc;
+    }
+
+    .autocomplete-item .code {
+      font-weight: 700;
+      color: #2563eb;
+    }
+
+    .autocomplete-item .address {
+      font-size: 0.85rem;
+      color: #64748b;
+      margin-top: 2px;
+    }
+
+    .result-card {
+      background: var(--card-bg);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      border: 1px solid var(--border-color);
+      display: none;
+    }
+
+    .result-header {
+      margin-bottom: 16px;
+    }
+
+    .carpark-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+
+    .carpark-address {
+      font-size: 0.9rem;
+      color: #64748b;
+      margin-top: 4px;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .status-badge.green {
+      background-color: var(--green-bg);
+      color: var(--green-text);
+    }
+
+    .status-badge.amber {
+      background-color: var(--amber-bg);
+      color: var(--amber-text);
+    }
+
+    .status-badge.red {
+      background-color: var(--red-bg);
+      color: var(--red-text);
+    }
+
+    .lot-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .lot-box {
+      background: #f8fafc;
+      padding: 12px;
+      border-radius: 10px;
+      text-align: center;
+    }
+
+    .lot-box .label {
+      font-size: 0.75rem;
+      color: #64748b;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .lot-box .value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+
+    .error-msg {
+      color: var(--red-text);
+      font-size: 0.9rem;
+      text-align: center;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>HDB Carpark Search</h1>
+      <p class="subtitle">Live availability lookup (Data.gov.sg)</p>
+    </header>
+
+    <div class="search-container">
+      <input type="text" id="searchInput" placeholder="Type carpark code or address..." autocomplete="off" />
+      <div id="autocompleteList" class="autocomplete-list" style="display: none;"></div>
+    </div>
+
+    <div id="resultCard" class="result-card">
+      <div class="result-header">
+        <div id="carparkCode" class="carpark-title">--</div>
+        <div id="carparkAddress" class="carpark-address">--</div>
+      </div>
+
+      <div id="statusBadge" class="status-badge green">--</div>
+
+      <div class="lot-grid">
+        <div class="lot-box">
+          <div class="label">Available Lots</div>
+          <div id="availLots" class="value">0</div>
+        </div>
+        <div class="lot-box">
+          <div class="label">Total Lots</div>
+          <div id="totalLots" class="value">0</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="errorMsg" class="error-msg"></div>
+  </div>
+
+  <script>
+    // Sample mapping for popular HDB carparks (add/modify as needed)
+    const carparkDirectory = [
+      { code: "ACB", address: "Blk 270/271 Albert Centre" },
+      { code: "B1", address: "Blk 101-108 Bishan Street 12" },
+      { code: "BM1", address: "Blk 101-105 Bukit Merah View" },
+      { code: "CAM", address: "Blk 501-505 Ang Mo Kio Ave 8" },
+      { code: "HLM", address: "Blk 531 Hong Lim Market & Food Centre" },
+      { code: "J6", address: "Blk 130-134 Jurong Gateway Road" },
+      { code: "SE1", address: "Blk 301-308 Serangoon Ave 2" },
+      { code: "TP1", address: "Blk 183-186 Toa Payoh Central" },
+      { code: "Y8", address: "Blk 747-752 Yishun Street 72" }
+    ];
+
+    const searchInput = document.getElementById('searchInput');
+    const autocompleteList = document.getElementById('autocompleteList');
+    const resultCard = document.getElementById('resultCard');
+    const errorMsg = document.getElementById('errorMsg');
+
+    // Autocomplete search listener
+    searchInput.addEventListener('input', function() {
+      const query = this.value.trim().toUpperCase();
+      autocompleteList.innerHTML = '';
+
+      if (!query) {
+        autocompleteList.style.display = 'none';
+        return;
+      }
+
+      // Filter local dictionary first, or show direct query code option
+      const matches = carparkDirectory.filter(cp => 
+        cp.code.includes(query) || cp.address.toUpperCase().includes(query)
+      );
+
+      // If no directory match, allow user to directly query the typed code
+      if (matches.length === 0) {
+        matches.push({ code: query, address: "Custom / Unknown Location" });
+      }
+
+      matches.slice(0, 5).forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'autocomplete-item';
+        div.innerHTML = `<div class="code">${item.code}</div><div class="address">${item.address}</div>`;
+        div.addEventListener('click', () => {
+          searchInput.value = item.code;
+          autocompleteList.style.display = 'none';
+          fetchCarparkAvailability(item.code, item.address);
+        });
+        autocompleteList.appendChild(div);
+      });
+
+      autocompleteList.style.display = 'block';
+    });
+
+    // Close dropdown on tap outside
+    document.addEventListener('click', function(e) {
+      if (e.target !== searchInput) {
+        autocompleteList.style.display = 'none';
+      }
+    });
+
+    // Fetch real-time API data
+    async function fetchCarparkAvailability(code, addressName) {
+      errorMsg.textContent = '';
+      try {
+        const response = await fetch('https://api.data.gov.sg/v1/transport/carpark-availability');
+        if (!response.ok) throw new Error('Failed to fetch API data');
+
+        const data = await response.json();
+        const carparkList = data.items[0].carpark_data;
+
+        // Find carpark matching the selected code
+        const carpark = carparkList.find(c => c.carpark_number.toUpperCase() === code);
+
+        if (!carpark) {
+          resultCard.style.display = 'none';
+          errorMsg.textContent = `No live availability data found for carpark code "${code}".`;
+          return;
+        }
+
+        // Aggregate total and available lots (handles multiple lot types C, H, S)
+        let totalLots = 0;
+        let availLots = 0;
+
+        carpark.carpark_info.forEach(info => {
+          totalLots += parseInt(info.total_lots, 10) || 0;
+          availLots += parseInt(info.lots_available, 10) || 0;
+        });
+
+        const percent = totalLots > 0 ? (availLots / totalLots) * 100 : 0;
+
+        // UI Updates
+        document.getElementById('carparkCode').textContent = `Carpark: ${code}`;
+        document.getElementById('carparkAddress').textContent = addressName;
+        document.getElementById('availLots').textContent = availLots;
+        document.getElementById('totalLots').textContent = totalLots;
+
+        const badge = document.getElementById('statusBadge');
+        badge.className = 'status-badge';
+
+        if (percent > 20) {
+          badge.classList.add('green');
+          badge.textContent = `${percent.toFixed(1)}% Available (High Availability)`;
+        } else if (percent >= 10) {
+          badge.classList.add('amber');
+          badge.textContent = `${percent.toFixed(1)}% Available (Moderate Availability)`;
+        } else {
+          badge.classList.add('red');
+          badge.textContent = `${percent.toFixed(1)}% Available (Low Availability)`;
+        }
+
+        resultCard.style.display = 'block';
+      } catch (err) {
+        resultCard.style.display = 'none';
+        errorMsg.textContent = 'Error connecting to data.gov.sg API. Please try again.';
+      }
+    }
+  </script>
+</body>
+</html>
