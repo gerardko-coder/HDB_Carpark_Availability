@@ -138,6 +138,21 @@
   }
   .hint b{ color:var(--ink); font-weight:400; }
 
+  .name-preview{
+    margin-top:8px;
+    font-size:14px;
+    font-weight:700;
+    color: var(--ink);
+    display:none;
+    align-items:center;
+    gap:8px;
+  }
+  .name-preview.show{ display:flex; }
+  .name-preview .pin{
+    color: #a3790b;
+    font-size:12px;
+  }
+
   /* ---- status states ---- */
   #status{ margin-top: 18px; }
   .msg{
@@ -195,6 +210,14 @@
     text-transform:uppercase;
     letter-spacing:.12em;
     margin-bottom:4px;
+  }
+  .cp-name{
+    font-family:'Archivo', sans-serif;
+    font-size:12px;
+    font-weight:700;
+    color: var(--board-ink-dim);
+    margin-top:4px;
+    line-height:1.3;
   }
   .updated{
     text-align:right;
@@ -289,6 +312,7 @@
       <input id="carparkInput" type="text" placeholder="Enter carpark number, e.g. ACB, HE12" autocomplete="off" inputmode="text" />
       <div class="suggestions" id="suggestions"></div>
     </div>
+    <div class="name-preview" id="namePreview"><span class="pin">📍</span><span id="namePreviewText"></span></div>
     <div class="hint" id="hint">Loading carpark list&hellip;</div>
 
     <div id="status"></div>
@@ -297,6 +321,7 @@
         <div>
           <div class="cp-label">Carpark No.</div>
           <div class="cp-number" id="cpNumber">—</div>
+          <div class="cp-name" id="cpName"></div>
         </div>
         <div class="updated" id="updated"><span class="dot"></span>—</div>
       </div>
@@ -312,6 +337,7 @@
 
 <script>
 const API_URL = 'https://api.data.gov.sg/v1/transport/carpark-availability';
+const INFO_DATASET_ID = 'd_23f946fa557947f93a8043bbef41dd09'; // HDB Carpark Information
 const LOT_TYPE_LABEL = { C: 'Cars', M: 'Motorcycles', H: 'Heavy Vehicles', Y: 'Heavy Vehicles' };
 
 const input = document.getElementById('carparkInput');
@@ -320,12 +346,57 @@ const hintEl = document.getElementById('hint');
 const statusEl = document.getElementById('status');
 const boardEl = document.getElementById('board');
 const cpNumberEl = document.getElementById('cpNumber');
+const cpNameEl = document.getElementById('cpName');
 const updatedEl = document.getElementById('updated');
 const lotGridEl = document.getElementById('lotGrid');
+const namePreviewEl = document.getElementById('namePreview');
+const namePreviewTextEl = document.getElementById('namePreviewText');
 
 let allCarparkNumbers = [];
+let carparkNames = {}; // carpark_number -> friendly address/name
 let debounceTimer = null;
 let lastLookedUp = '';
+
+function titleCase(str){
+  return str.toLowerCase().replace(/(^|[\s/(])([a-z])/g, (m, sep, ch) => sep + ch.toUpperCase());
+}
+
+// Minimal CSV parser that respects quoted fields.
+function parseCSV(text){
+  const rows = [];
+  let cur = '', row = [], inQuotes = false;
+  for(let i = 0; i < text.length; i++){
+    const ch = text[i];
+    if(inQuotes){
+      if(ch === '"'){
+        if(text[i+1] === '"'){ cur += '"'; i++; } else { inQuotes = false; }
+      } else { cur += ch; }
+    } else if(ch === '"'){
+      inQuotes = true;
+    } else if(ch === ','){
+      row.push(cur); cur = '';
+    } else if(ch === '\n' || ch === '\r'){
+      if(ch === '\r' && text[i+1] === '\n') i++;
+      row.push(cur); cur = '';
+      if(row.length > 1 || row[0] !== ''){ rows.push(row); }
+      row = [];
+    } else {
+      cur += ch;
+    }
+  }
+  if(cur !== '' || row.length){ row.push(cur); rows.push(row); }
+  return rows;
+}
+
+function updateNamePreview(query){
+  const name = carparkNames[query];
+  if(query && name){
+    namePreviewTextEl.textContent = name;
+    namePreviewEl.classList.add('show');
+  } else {
+    namePreviewEl.classList.remove('show');
+  }
+}
 
 function setStatus(text, isError){
   statusEl.innerHTML = text ? `<div class="msg${isError ? ' error' : ''}">${text}</div>` : '';
@@ -345,6 +416,7 @@ function statusClass(available, total){
 
 function renderResult(entry){
   cpNumberEl.textContent = entry.carpark_number;
+  cpNameEl.textContent = carparkNames[entry.carpark_number] || '';
 
   const updatedDate = new Date(entry.update_datetime);
   const timeStr = isNaN(updatedDate) ? entry.update_datetime : updatedDate.toLocaleTimeString('en-SG', { hour:'2-digit', minute:'2-digit' });
@@ -455,6 +527,7 @@ function updateSuggestions(query){
 function handleInput(){
   const query = input.value.trim().toUpperCase();
   updateSuggestions(query);
+  updateNamePreview(query);
 
   clearTimeout(debounceTimer);
   if(!query){
@@ -491,7 +564,45 @@ async function preloadCarparkList(){
     hintEl.textContent = 'Carpark suggestions unavailable — you can still search by exact carpark number.';
   }
 }
+async function preloadCarparkNames(){
+  try{
+    // Step 1: ask data.gov.sg for a signed download URL for the dataset.
+    const pollRes = await fetch(`https://api-open.data.gov.sg/v1/public/api/datasets/${INFO_DATASET_ID}/poll-download`);
+    const pollData = await pollRes.json();
+    if(pollData.code !== 0 || !pollData.data || !pollData.data.url){
+      throw new Error(pollData.errMsg || 'No download URL returned');
+    }
+    // Step 2: fetch the actual CSV from the signed URL.
+    const csvRes = await fetch(pollData.data.url);
+    const csvText = await csvRes.text();
+    const rows = parseCSV(csvText);
+    if(!rows.length) throw new Error('Empty dataset');
+
+    const header = rows[0].map(h => h.trim().toLowerCase());
+    const noIdx = header.indexOf('car_park_no');
+    const addrIdx = header.indexOf('address');
+    if(noIdx === -1 || addrIdx === -1) throw new Error('Unexpected column layout');
+
+    const names = {};
+    for(let i = 1; i < rows.length; i++){
+      const r = rows[i];
+      if(!r || !r[noIdx]) continue;
+      names[r[noIdx].trim().toUpperCase()] = titleCase(r[addrIdx].trim());
+    }
+    carparkNames = names;
+
+    // Refresh anything already on screen now that names are available.
+    updateNamePreview(input.value.trim().toUpperCase());
+    if(boardEl.classList.contains('open') && lastLookedUp){
+      cpNameEl.textContent = carparkNames[lastLookedUp] || '';
+    }
+  } catch(err){
+    console.error('Carpark name lookup unavailable:', err);
+  }
+}
+
 preloadCarparkList();
+preloadCarparkNames();
 </script>
 </body>
 </html>
